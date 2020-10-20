@@ -23,6 +23,7 @@ import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeMap;
 import com.google.googlejavaformat.Input.Tok;
 import com.google.googlejavaformat.Input.Token;
+import com.sun.tools.javac.parser.Tokens.TokenKind;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -31,7 +32,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import javax.lang.model.element.Modifier;
-import org.openjdk.tools.javac.parser.Tokens.TokenKind;
 
 /** Fixes sequences of modifiers to be in JLS order. */
 final class ModifierOrderer {
@@ -77,7 +77,7 @@ final class ModifierOrderer {
   /** Reorders all modifiers in the given text to be in JLS order. */
   static JavaInput reorderModifiers(String text) throws FormatterException {
     return reorderModifiers(
-        new JavaInput(text), Collections.singleton(Range.closedOpen(0, text.length())));
+        new JavaInput(text), ImmutableList.of(Range.closedOpen(0, text.length())));
   }
 
   /**

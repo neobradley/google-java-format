@@ -14,9 +14,10 @@
 
 package com.google.googlejavaformat.java;
 
+import static com.google.common.base.StandardSystemProperty.JAVA_CLASS_VERSION;
+import static com.google.common.base.StandardSystemProperty.JAVA_SPECIFICATION_VERSION;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
-import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
@@ -32,13 +33,19 @@ import com.google.googlejavaformat.FormattingError;
 import com.google.googlejavaformat.Newlines;
 import com.google.googlejavaformat.Op;
 import com.google.googlejavaformat.OpsBuilder;
-import java.io.File;
+import com.sun.tools.javac.file.JavacFileManager;
+import com.sun.tools.javac.parser.JavacParser;
+import com.sun.tools.javac.parser.ParserFactory;
+import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
+import com.sun.tools.javac.util.Context;
+import com.sun.tools.javac.util.Log;
+import com.sun.tools.javac.util.Options;
 import java.io.IOError;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
@@ -46,22 +53,15 @@ import javax.tools.DiagnosticListener;
 import javax.tools.JavaFileObject;
 import javax.tools.SimpleJavaFileObject;
 import javax.tools.StandardLocation;
-import org.openjdk.tools.javac.file.JavacFileManager;
-import org.openjdk.tools.javac.parser.JavacParser;
-import org.openjdk.tools.javac.parser.ParserFactory;
-import org.openjdk.tools.javac.tree.JCTree.JCCompilationUnit;
-import org.openjdk.tools.javac.util.Context;
-import org.openjdk.tools.javac.util.Log;
-import org.openjdk.tools.javac.util.Options;
 
 /**
  * This is google-java-format, a new Java formatter that follows the Google Java Style Guide quite
  * precisely---to the letter and to the spirit.
  *
- * <p>This formatter uses the Eclipse parser to generate an AST. Because the Eclipse AST loses
- * information about the non-tokens in the input (including newlines, comments, etc.), and even some
- * tokens (e.g., optional commas or semicolons), this formatter lexes the input again and follows
- * along in the resulting list of tokens. Its lexer splits all multi-character operators (like ">>")
+ * <p>This formatter uses the javac parser to generate an AST. Because the AST loses information
+ * about the non-tokens in the input (including newlines, comments, etc.), and even some tokens
+ * (e.g., optional commas or semicolons), this formatter lexes the input again and follows along in
+ * the resulting list of tokens. Its lexer splits all multi-character operators (like "&gt;&gt;")
  * into multiple single-character operators. Each non-token is assigned to a token---non-tokens
  * following a token on the same line go with that token; those following go with the next token---
  * and there is a final EOF token to hold final comments.
@@ -89,26 +89,9 @@ import org.openjdk.tools.javac.util.Options;
 @Immutable
 public final class Formatter {
 
-  static final Range<Integer> EMPTY_RANGE = Range.closedOpen(-1, -1);
+  public static final int MAX_LINE_LENGTH = 100;
 
-  static final Predicate<Diagnostic<?>> ERROR_DIAGNOSTIC =
-      new Predicate<Diagnostic<?>>() {
-        @Override
-        public boolean apply(Diagnostic<?> input) {
-          if (input.getKind() != Diagnostic.Kind.ERROR) {
-            return false;
-          }
-          switch (input.getCode()) {
-            case "compiler.err.invalid.meth.decl.ret.type.req":
-              // accept constructor-like method declarations that don't match the name of their
-              // enclosing class
-              return false;
-            default:
-              break;
-          }
-          return true;
-        }
-      };
+  static final Range<Integer> EMPTY_RANGE = Range.closedOpen(-1, -1);
 
   private final JavaFormatterOptions options;
 
@@ -129,16 +112,17 @@ public final class Formatter {
    * @param javaOutput the {@link JavaOutput}
    * @param options the {@link JavaFormatterOptions}
    */
-  static void format(
-      final JavaInput javaInput, JavaOutput javaOutput, JavaFormatterOptions options) {
+  static void format(final JavaInput javaInput, JavaOutput javaOutput, JavaFormatterOptions options)
+      throws FormatterException {
     Context context = new Context();
     DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
     context.put(DiagnosticListener.class, diagnostics);
     Options.instance(context).put("allowStringFolding", "false");
+    Options.instance(context).put("--enable-preview", "true");
     JCCompilationUnit unit;
     JavacFileManager fileManager = new JavacFileManager(context, true, UTF_8);
     try {
-      fileManager.setLocation(StandardLocation.PLATFORM_CLASS_PATH, ImmutableList.<File>of());
+      fileManager.setLocation(StandardLocation.PLATFORM_CLASS_PATH, ImmutableList.of());
     } catch (IOException e) {
       // impossible
       throw new IOError(e);
@@ -163,20 +147,65 @@ public final class Formatter {
 
     javaInput.setCompilationUnit(unit);
     Iterable<Diagnostic<? extends JavaFileObject>> errorDiagnostics =
-        Iterables.filter(diagnostics.getDiagnostics(), ERROR_DIAGNOSTIC);
+        Iterables.filter(diagnostics.getDiagnostics(), Formatter::errorDiagnostic);
     if (!Iterables.isEmpty(errorDiagnostics)) {
-      throw FormattingError.fromJavacDiagnostics(errorDiagnostics);
+      throw FormatterException.fromJavacDiagnostics(errorDiagnostics);
     }
     OpsBuilder builder = new OpsBuilder(javaInput, javaOutput);
     // Output the compilation unit.
-    new JavaInputAstVisitor(builder, options.indentationMultiplier()).scan(unit, null);
+    JavaInputAstVisitor visitor;
+    if (getMajor() >= 14) {
+      try {
+        visitor =
+            Class.forName("com.google.googlejavaformat.java.java14.Java14InputAstVisitor")
+                .asSubclass(JavaInputAstVisitor.class)
+                .getConstructor(OpsBuilder.class, int.class)
+                .newInstance(builder, options.indentationMultiplier());
+      } catch (ReflectiveOperationException e) {
+        throw new LinkageError(e.getMessage(), e);
+      }
+    } else {
+      visitor = new JavaInputAstVisitor(builder, options.indentationMultiplier());
+    }
+    visitor.scan(unit, null);
     builder.sync(javaInput.getText().length());
     builder.drain();
     Doc doc = new DocBuilder().withOps(builder.build()).build();
-    doc.computeBreaks(
-        javaOutput.getCommentsHelper(), options.maxLineLength(), new Doc.State(+0, 0));
+    doc.computeBreaks(javaOutput.getCommentsHelper(), MAX_LINE_LENGTH, new Doc.State(+0, 0));
     doc.write(javaOutput);
     javaOutput.flush();
+  }
+
+  // Runtime.Version was added in JDK 9, so use reflection to access it to preserve source
+  // compatibility with Java 8.
+  private static int getMajor() {
+    try {
+      Method versionMethod = Runtime.class.getMethod("version");
+      Object version = versionMethod.invoke(null);
+      return (int) version.getClass().getMethod("major").invoke(version);
+    } catch (Exception e) {
+      // continue below
+    }
+    int version = (int) Double.parseDouble(JAVA_CLASS_VERSION.value());
+    if (49 <= version && version <= 52) {
+      return version - (49 - 5);
+    }
+    throw new IllegalStateException("Unknown Java version: " + JAVA_SPECIFICATION_VERSION.value());
+  }
+
+  static boolean errorDiagnostic(Diagnostic<?> input) {
+    if (input.getKind() != Diagnostic.Kind.ERROR) {
+      return false;
+    }
+    switch (input.getCode()) {
+      case "compiler.err.invalid.meth.decl.ret.type.req":
+        // accept constructor-like method declarations that don't match the name of their
+        // enclosing class
+        return false;
+      default:
+        break;
+    }
+    return true;
   }
 
   /**
@@ -194,12 +223,34 @@ public final class Formatter {
   /**
    * Format an input string (a Java compilation unit) into an output string.
    *
+   * <p>Leaves import statements untouched.
+   *
    * @param input the input string
    * @return the output string
    * @throws FormatterException if the input string cannot be parsed
    */
   public String formatSource(String input) throws FormatterException {
-    return formatSource(input, Collections.singleton(Range.closedOpen(0, input.length())));
+    return formatSource(input, ImmutableList.of(Range.closedOpen(0, input.length())));
+  }
+
+  /**
+   * Formats an input string (a Java compilation unit) and fixes imports.
+   *
+   * <p>Fixing imports includes ordering, spacing, and removal of unused import statements.
+   *
+   * @param input the input string
+   * @return the output string
+   * @throws FormatterException if the input string cannot be parsed
+   * @see <a
+   *     href="https://google.github.io/styleguide/javaguide.html#s3.3.3-import-ordering-and-spacing">
+   *     Google Java Style Guide - 3.3.3 Import ordering and spacing</a>
+   */
+  public String formatSourceAndFixImports(String input) throws FormatterException {
+    input = ImportOrderer.reorderImports(input, options.style());
+    input = RemoveUnusedImports.removeUnusedImports(input);
+    String formatted = formatSource(input);
+    formatted = StringWrapper.wrap(formatted, this);
+    return formatted;
   }
 
   /**

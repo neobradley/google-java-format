@@ -19,7 +19,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import com.google.common.base.Joiner;
 
 /** Checked exception class for formatter command-line usage errors. */
-public final class UsageException extends Exception {
+final class UsageException extends Exception {
 
   private static final Joiner NEWLINE_JOINER = Joiner.on(System.lineSeparator());
 
@@ -36,24 +36,37 @@ public final class UsageException extends Exception {
     "    Send formatted output back to files, not stdout.",
     "  -",
     "    Format stdin -> stdout",
+    "  --assume-filename, -assume-filename",
+    "    File name to use for diagnostics when formatting standard input (default is <stdin>).",
     "  --aosp, -aosp, -a",
-    "    Use AOSP style instead of Google Style (4-space indentation)",
+    "    Use AOSP style instead of Google Style (4-space indentation).",
     "  --fix-imports-only",
     "    Fix import order and remove any unused imports, but do no other formatting.",
     "  --skip-sorting-imports",
     "    Do not fix the import order. Unused imports will still be removed.",
     "  --skip-removing-unused-imports",
     "    Do not remove unused imports. Imports will still be sorted.",
-    "  --length, -length",
-    "    Character length to format.",
+    " . --skip-reflowing-long-strings",
+    "    Do not reflow string literals that exceed the column limit.",
+    " . --skip-javadoc-formatting",
+    "    Do not reformat javadoc.",
+    "  --dry-run, -n",
+    "    Prints the paths of the files whose contents would change if the formatter were run"
+        + " normally.",
+    "  --set-exit-if-changed",
+    "    Return exit code 1 if there are any formatting changes.",
     "  --lines, -lines, --line, -line",
     "    Line range(s) to format, like 5:10 (1-based; default is all).",
     "  --offset, -offset",
     "    Character offset to format (0-based; default is all).",
+    "  --length, -length",
+    "    Character length to format.",
     "  --help, -help, -h",
-    "    Print this usage statement",
+    "    Print this usage statement.",
     "  --version, -version, -v",
     "    Print the version.",
+    "  @<filename>",
+    "    Read options and filenames from file.",
     "",
   };
 
@@ -80,9 +93,13 @@ public final class UsageException extends Exception {
     appendLines(builder, USAGE);
     appendLines(builder, ADDITIONAL_USAGE);
     appendLines(builder, new String[] {""});
-    appendLines(builder, Main.VERSION);
+    appendLine(builder, Main.versionString());
     appendLines(builder, DOCS_LINK);
     return builder.toString();
+  }
+
+  private static void appendLine(StringBuilder builder, String line) {
+    builder.append(line).append(System.lineSeparator());
   }
 
   private static void appendLines(StringBuilder builder, String[] lines) {

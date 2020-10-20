@@ -14,6 +14,7 @@
 
 package com.google.googlejavaformat.java;
 
+import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
 import org.junit.Test;
@@ -29,7 +30,7 @@ public class CommandLineFlagsTest {
   // TODO(eaftan): Disallow passing both -lines and -offset/-length, like clang-format.
 
   @Test
-  public void formatInPlaceRequiresAtLeastOneFile() {
+  public void formatInPlaceRequiresAtLeastOneFile() throws UsageException {
     try {
       Main.processArgs("-i");
       fail();
@@ -44,21 +45,13 @@ public class CommandLineFlagsTest {
       // expected
     }
 
-    try {
-      Main.processArgs("-i", "Foo.java");
-      Main.processArgs("-i", "Foo.java", "Bar.java");
-    } catch (UsageException e) {
-      fail();
-    }
+    Main.processArgs("-i", "Foo.java");
+    Main.processArgs("-i", "Foo.java", "Bar.java");
   }
 
   @Test
-  public void formatASubsetRequiresExactlyOneFile() {
-    try {
-      Main.processArgs("-lines", "10", "Foo.java");
-    } catch (UsageException e) {
-      fail();
-    }
+  public void formatASubsetRequiresExactlyOneFile() throws UsageException {
+    Main.processArgs("-lines", "10", "Foo.java");
 
     try {
       Main.processArgs("-lines", "10");
@@ -74,11 +67,7 @@ public class CommandLineFlagsTest {
       // expected
     }
 
-    try {
-      Main.processArgs("-offset", "10", "-length", "10", "Foo.java");
-    } catch (UsageException e) {
-      fail();
-    }
+    Main.processArgs("-offset", "10", "-length", "10", "Foo.java");
 
     try {
       Main.processArgs("-offset", "10", "-length", "10");
@@ -98,12 +87,8 @@ public class CommandLineFlagsTest {
   // TODO(eaftan): clang-format allows a single offset with no length, which means to format
   // up to the end of the file.  We should match that behavior.
   @Test
-  public void numberOfOffsetsMustMatchNumberOfLengths() {
-    try {
-      Main.processArgs("-offset", "10", "-length", "20", "Foo.java");
-    } catch (UsageException e) {
-      fail();
-    }
+  public void numberOfOffsetsMustMatchNumberOfLengths() throws UsageException {
+    Main.processArgs("-offset", "10", "-length", "20", "Foo.java");
 
     try {
       Main.processArgs("-offset", "10", "-length", "20", "-offset", "50", "Foo.java");
@@ -121,18 +106,10 @@ public class CommandLineFlagsTest {
   }
 
   @Test
-  public void noFilesToFormatRequiresEitherHelpOrVersion() {
-    try {
-      Main.processArgs("-version");
-    } catch (UsageException e) {
-      fail();
-    }
+  public void noFilesToFormatRequiresEitherHelpOrVersion() throws UsageException {
+    Main.processArgs("-version");
 
-    try {
-      Main.processArgs("-help");
-    } catch (UsageException e) {
-      fail();
-    }
+    Main.processArgs("-help");
 
     try {
       Main.processArgs();
@@ -146,6 +123,54 @@ public class CommandLineFlagsTest {
       fail();
     } catch (UsageException e) {
       // expected
+    }
+  }
+
+  @Test
+  public void stdinAndFiles() {
+    try {
+      Main.processArgs("-", "A.java");
+      fail();
+    } catch (UsageException e) {
+      assertThat(e)
+          .hasMessageThat()
+          .contains("cannot format from standard input and files simultaneously");
+    }
+  }
+
+  @Test
+  public void inPlaceStdin() {
+    try {
+      Main.processArgs("-i", "-");
+      fail();
+    } catch (UsageException e) {
+      assertThat(e)
+          .hasMessageThat()
+          .contains("in-place formatting was requested but no files were provided");
+    }
+  }
+
+  @Test
+  public void inPlaceDryRun() {
+    try {
+      Main.processArgs("-i", "-n", "A.java");
+      fail();
+    } catch (UsageException e) {
+      assertThat(e)
+          .hasMessageThat()
+          .contains("cannot use --dry-run and --in-place at the same time");
+    }
+  }
+
+  @Test
+  public void assumeFileNameOnlyWorksWithStdin() {
+    try {
+      Main.processArgs("--assume-filename=Foo.java", "Foo.java");
+      fail();
+    } catch (UsageException e) {
+      assertThat(e)
+          .hasMessageThat()
+          .contains("--assume-filename is only supported when formatting standard input");
     }
   }
 }

@@ -82,7 +82,8 @@ class B20128760 {
   public class Foo
       extends Xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
       implements Xxxxxxxxxxxxx<
-              Xxxxxxxxxxxxxxxxxxxxxxxxxxxxx, Xxxxxxxxxxxxxxxxxxxxxxxxxxxxx,
+              Xxxxxxxxxxxxxxxxxxxxxxxxxxxxx,
+              Xxxxxxxxxxxxxxxxxxxxxxxxxxxxx,
               Xxxxxxxxxxxxxxxxxxxxxxxxxxxxx>,
           Xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx {}
 
@@ -91,14 +92,11 @@ class B20128760 {
         stream(members)
             .flatMap(
                 m ->
-                    m.getFieldValues()
-                        .entrySet()
-                        .stream()
+                    m.getFieldValues().entrySet().stream()
                         .filter(fv -> itemLinkFieldIds.contains(fv.getKey()))
                         .flatMap(
                             fv ->
-                                FieldDTO.deserializeStringToListOfStrings(fv.getValue())
-                                    .stream()
+                                FieldDTO.deserializeStringToListOfStrings(fv.getValue()).stream()
                                     .map(
                                         id ->
                                             new ItemKey(

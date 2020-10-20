@@ -18,19 +18,19 @@ import static com.google.common.base.Preconditions.checkArgument;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import com.sun.tools.javac.parser.JavaTokenizer;
+import com.sun.tools.javac.parser.Scanner;
+import com.sun.tools.javac.parser.ScannerFactory;
+import com.sun.tools.javac.parser.Tokens.Comment;
+import com.sun.tools.javac.parser.Tokens.Comment.CommentStyle;
+import com.sun.tools.javac.parser.Tokens.Token;
+import com.sun.tools.javac.parser.Tokens.TokenKind;
+import com.sun.tools.javac.parser.UnicodeReader;
+import com.sun.tools.javac.util.Context;
 import java.util.Set;
-import org.openjdk.tools.javac.parser.JavaTokenizer;
-import org.openjdk.tools.javac.parser.Scanner;
-import org.openjdk.tools.javac.parser.ScannerFactory;
-import org.openjdk.tools.javac.parser.Tokens.Comment;
-import org.openjdk.tools.javac.parser.Tokens.Comment.CommentStyle;
-import org.openjdk.tools.javac.parser.Tokens.Token;
-import org.openjdk.tools.javac.parser.Tokens.TokenKind;
-import org.openjdk.tools.javac.parser.UnicodeReader;
-import org.openjdk.tools.javac.util.Context;
 
 /** A wrapper around javac's lexer. */
-public class JavacTokens {
+class JavacTokens {
 
   /** The lexer eats terminal comments, so feed it one we don't care about. */
   // TODO(b/33103797): fix javac and remove the work-around
@@ -82,6 +82,7 @@ public class JavacTokens {
     Scanner scanner =
         new AccessibleScanner(fac, new CommentSavingTokenizer(fac, buffer, buffer.length));
     ImmutableList.Builder<RawTok> tokens = ImmutableList.builder();
+    int end = source.length();
     int last = 0;
     do {
       scanner.nextToken();
@@ -97,6 +98,9 @@ public class JavacTokens {
         }
       }
       if (stopTokens.contains(t.kind)) {
+        if (t.kind != TokenKind.EOF) {
+          end = t.pos;
+        }
         break;
       }
       if (last < t.pos) {
@@ -110,8 +114,8 @@ public class JavacTokens {
               t.endPos));
       last = t.endPos;
     } while (scanner.token().kind != TokenKind.EOF);
-    if (last < source.length()) {
-      tokens.add(new RawTok(null, null, last, source.length()));
+    if (last < end) {
+      tokens.add(new RawTok(null, null, last, end));
     }
     return tokens.build();
   }

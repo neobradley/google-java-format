@@ -26,6 +26,9 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -36,6 +39,19 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class DiagnosticTest {
   @Rule public TemporaryFolder testFolder = new TemporaryFolder();
+
+  private Locale backupLocale;
+
+  @Before
+  public void setUpLocale() throws Exception {
+    backupLocale = Locale.getDefault();
+    Locale.setDefault(Locale.ROOT);
+  }
+
+  @After
+  public void restoreLocale() throws Exception {
+    Locale.setDefault(backupLocale);
+  }
 
   @Test
   public void parseError() throws Exception {
@@ -127,8 +143,7 @@ public class DiagnosticTest {
 
     int result = main.format("-i", pathOne.toString(), pathTwo.toString());
     assertThat(stdout.toString()).isEmpty();
-    assertThat(stderr.toString())
-        .contains("One.java:1:14: error: class, interface, or enum expected");
+    assertThat(stderr.toString()).contains("One.java:1:14: error: class, interface");
     assertThat(result).isEqualTo(1);
     // don't edit files with parse errors
     assertThat(Files.readAllLines(pathOne, UTF_8)).containsExactly("class One {}}");

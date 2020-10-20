@@ -14,9 +14,18 @@
 
 package com.google.googlejavaformat.java;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+import com.google.common.base.CharMatcher;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -25,11 +34,15 @@ final class CommandLineOptionsParser {
 
   private static final Splitter COMMA_SPLITTER = Splitter.on(',');
   private static final Splitter COLON_SPLITTER = Splitter.on(':');
+  private static final Splitter ARG_SPLITTER =
+      Splitter.on(CharMatcher.breakingWhitespace()).omitEmptyStrings().trimResults();
 
   /** Parses {@link CommandLineOptions}. */
   static CommandLineOptions parse(Iterable<String> options) {
     CommandLineOptions.Builder optionsBuilder = CommandLineOptions.builder();
-    Iterator<String> it = options.iterator();
+    List<String> expandedOptions = new ArrayList<>();
+    expandParamsFiles(options, expandedOptions);
+    Iterator<String> it = expandedOptions.iterator();
     while (it.hasNext()) {
       String option = it.next();
       if (!option.startsWith("-")) {
@@ -86,17 +99,31 @@ final class CommandLineOptionsParser {
         case "--fix-imports-only":
           optionsBuilder.fixImportsOnly(true);
           break;
-        case "--experimental-remove-javadoc-only-imports":
-          optionsBuilder.removeJavadocOnlyImports(true);
-          break;
         case "--skip-sorting-imports":
           optionsBuilder.sortImports(false);
           break;
         case "--skip-removing-unused-imports":
           optionsBuilder.removeUnusedImports(false);
           break;
+        case "--skip-reflowing-long-strings":
+          optionsBuilder.reflowLongStrings(false);
+          break;
+        case "--skip-javadoc-formatting":
+          optionsBuilder.formatJavadoc(false);
+          break;
         case "-":
           optionsBuilder.stdin(true);
+          break;
+        case "-n":
+        case "--dry-run":
+          optionsBuilder.dryRun(true);
+          break;
+        case "--set-exit-if-changed":
+          optionsBuilder.setExitIfChanged(true);
+          break;
+        case "-assume-filename":
+        case "--assume-filename":
+          optionsBuilder.assumeFilename(getValue(flag, it, value));
           break;
         default:
           throw new IllegalArgumentException("unexpected flag: " + flag);
@@ -152,6 +179,31 @@ final class CommandLineOptionsParser {
         return Range.closedOpen(line0, line1 + 1);
       default:
         throw new IllegalArgumentException(arg);
+    }
+  }
+
+  /**
+   * Pre-processes an argument list, expanding arguments of the form {@code @filename} by reading
+   * the content of the file and appending whitespace-delimited options to {@code arguments}.
+   */
+  private static void expandParamsFiles(Iterable<String> args, List<String> expanded) {
+    for (String arg : args) {
+      if (arg.isEmpty()) {
+        continue;
+      }
+      if (!arg.startsWith("@")) {
+        expanded.add(arg);
+      } else if (arg.startsWith("@@")) {
+        expanded.add(arg.substring(1));
+      } else {
+        Path path = Paths.get(arg.substring(1));
+        try {
+          String sequence = new String(Files.readAllBytes(path), UTF_8);
+          expandParamsFiles(ARG_SPLITTER.split(sequence), expanded);
+        } catch (IOException e) {
+          throw new UncheckedIOException(path + ": could not read file: " + e.getMessage(), e);
+        }
+      }
     }
   }
 }

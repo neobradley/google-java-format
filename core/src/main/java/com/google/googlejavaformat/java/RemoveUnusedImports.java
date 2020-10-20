@@ -28,8 +28,30 @@ import com.google.common.collect.RangeMap;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeMap;
 import com.google.common.collect.TreeRangeSet;
-import com.google.googlejavaformat.FormattingError;
 import com.google.googlejavaformat.Newlines;
+import com.sun.source.doctree.DocCommentTree;
+import com.sun.source.doctree.ReferenceTree;
+import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.ImportTree;
+import com.sun.source.tree.Tree;
+import com.sun.source.util.DocTreePath;
+import com.sun.source.util.DocTreePathScanner;
+import com.sun.source.util.TreePathScanner;
+import com.sun.source.util.TreeScanner;
+import com.sun.tools.javac.api.JavacTrees;
+import com.sun.tools.javac.file.JavacFileManager;
+import com.sun.tools.javac.parser.JavacParser;
+import com.sun.tools.javac.parser.ParserFactory;
+import com.sun.tools.javac.tree.DCTree;
+import com.sun.tools.javac.tree.DCTree.DCReference;
+import com.sun.tools.javac.tree.JCTree;
+import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
+import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
+import com.sun.tools.javac.tree.JCTree.JCIdent;
+import com.sun.tools.javac.tree.JCTree.JCImport;
+import com.sun.tools.javac.util.Context;
+import com.sun.tools.javac.util.Log;
+import com.sun.tools.javac.util.Options;
 import java.io.IOError;
 import java.io.IOException;
 import java.net.URI;
@@ -42,43 +64,12 @@ import javax.tools.DiagnosticListener;
 import javax.tools.JavaFileObject;
 import javax.tools.SimpleJavaFileObject;
 import javax.tools.StandardLocation;
-import org.openjdk.source.doctree.DocCommentTree;
-import org.openjdk.source.doctree.ReferenceTree;
-import org.openjdk.source.tree.IdentifierTree;
-import org.openjdk.source.tree.ImportTree;
-import org.openjdk.source.tree.Tree;
-import org.openjdk.source.util.DocTreePath;
-import org.openjdk.source.util.DocTreePathScanner;
-import org.openjdk.source.util.TreePathScanner;
-import org.openjdk.source.util.TreeScanner;
-import org.openjdk.tools.javac.api.JavacTrees;
-import org.openjdk.tools.javac.file.JavacFileManager;
-import org.openjdk.tools.javac.parser.JavacParser;
-import org.openjdk.tools.javac.parser.ParserFactory;
-import org.openjdk.tools.javac.tree.DCTree;
-import org.openjdk.tools.javac.tree.DCTree.DCReference;
-import org.openjdk.tools.javac.tree.JCTree;
-import org.openjdk.tools.javac.tree.JCTree.JCCompilationUnit;
-import org.openjdk.tools.javac.tree.JCTree.JCFieldAccess;
-import org.openjdk.tools.javac.tree.JCTree.JCIdent;
-import org.openjdk.tools.javac.tree.JCTree.JCImport;
-import org.openjdk.tools.javac.util.Context;
-import org.openjdk.tools.javac.util.Log;
-import org.openjdk.tools.javac.util.Options;
 
 /**
  * Removes unused imports from a source file. Imports that are only used in javadoc are also
  * removed, and the references in javadoc are replaced with fully qualified names.
  */
 public class RemoveUnusedImports {
-
-  /** Configuration for javadoc-only imports. */
-  public enum JavadocOnlyImports {
-    /** Remove imports that are only used in javadoc, and fully qualify any {@code @link} tags. */
-    REMOVE,
-    /** Keep imports that are only used in javadoc. */
-    KEEP
-  }
 
   // Visits an AST, recording all simple names that could refer to imported
   // types and also any javadoc references that could refer to imported
@@ -146,7 +137,7 @@ public class RemoveUnusedImports {
     // scan javadoc comments, checking for references to imported types
     class DocTreeScanner extends DocTreePathScanner<Void, Void> {
       @Override
-      public Void visitIdentifier(org.openjdk.source.doctree.IdentifierTree node, Void aVoid) {
+      public Void visitIdentifier(com.sun.source.doctree.IdentifierTree node, Void aVoid) {
         return null;
       }
 
@@ -192,8 +183,7 @@ public class RemoveUnusedImports {
     }
   }
 
-  public static String removeUnusedImports(
-      final String contents, JavadocOnlyImports javadocOnlyImports) {
+  public static String removeUnusedImports(final String contents) throws FormatterException {
     Context context = new Context();
     JCCompilationUnit unit = parse(context, contents);
     if (unit == null) {
@@ -203,14 +193,14 @@ public class RemoveUnusedImports {
     UnusedImportScanner scanner = new UnusedImportScanner(JavacTrees.instance(context));
     scanner.scan(unit, null);
     return applyReplacements(
-        contents,
-        buildReplacements(
-            contents, unit, scanner.usedNames, scanner.usedInJavadoc, javadocOnlyImports));
+        contents, buildReplacements(contents, unit, scanner.usedNames, scanner.usedInJavadoc));
   }
 
-  private static JCCompilationUnit parse(Context context, String javaInput) {
+  private static JCCompilationUnit parse(Context context, String javaInput)
+      throws FormatterException {
     DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
     context.put(DiagnosticListener.class, diagnostics);
+    Options.instance(context).put("--enable-preview", "true");
     Options.instance(context).put("allowStringFolding", "false");
     JCCompilationUnit unit;
     JavacFileManager fileManager = new JavacFileManager(context, true, UTF_8);
@@ -235,10 +225,10 @@ public class RemoveUnusedImports {
     unit = parser.parseCompilationUnit();
     unit.sourcefile = source;
     Iterable<Diagnostic<? extends JavaFileObject>> errorDiagnostics =
-        Iterables.filter(diagnostics.getDiagnostics(), Formatter.ERROR_DIAGNOSTIC);
+        Iterables.filter(diagnostics.getDiagnostics(), Formatter::errorDiagnostic);
     if (!Iterables.isEmpty(errorDiagnostics)) {
       // error handling is done during formatting
-      throw FormattingError.fromJavacDiagnostics(errorDiagnostics);
+      throw FormatterException.fromJavacDiagnostics(errorDiagnostics);
     }
     return unit;
   }
@@ -248,12 +238,11 @@ public class RemoveUnusedImports {
       String contents,
       JCCompilationUnit unit,
       Set<String> usedNames,
-      Multimap<String, Range<Integer>> usedInJavadoc,
-      JavadocOnlyImports javadocOnlyImports) {
+      Multimap<String, Range<Integer>> usedInJavadoc) {
     RangeMap<Integer, String> replacements = TreeRangeMap.create();
     for (JCImport importTree : unit.getImports()) {
       String simpleName = getSimpleName(importTree);
-      if (!isUnused(unit, usedNames, usedInJavadoc, javadocOnlyImports, importTree, simpleName)) {
+      if (!isUnused(unit, usedNames, usedInJavadoc, importTree, simpleName)) {
         continue;
       }
       // delete the import
@@ -261,21 +250,10 @@ public class RemoveUnusedImports {
       endPosition = Math.max(CharMatcher.isNot(' ').indexIn(contents, endPosition), endPosition);
       String sep = Newlines.guessLineSeparator(contents);
       if (endPosition + sep.length() < contents.length()
-          && contents.subSequence(endPosition, endPosition + sep.length()).equals(sep)) {
+          && contents.subSequence(endPosition, endPosition + sep.length()).toString().equals(sep)) {
         endPosition += sep.length();
       }
       replacements.put(Range.closedOpen(importTree.getStartPosition(), endPosition), "");
-      // fully qualify any javadoc references with the same simple name as a deleted
-      // non-static import
-      if (!importTree.isStatic()) {
-        for (Range<Integer> docRange : usedInJavadoc.get(simpleName)) {
-          if (docRange == null) {
-            continue;
-          }
-          String replaceWith = importTree.getQualifiedIdentifier().toString();
-          replacements.put(docRange, replaceWith);
-        }
-      }
     }
     return replacements;
   }
@@ -290,17 +268,15 @@ public class RemoveUnusedImports {
       JCCompilationUnit unit,
       Set<String> usedNames,
       Multimap<String, Range<Integer>> usedInJavadoc,
-      JavadocOnlyImports javadocOnlyImports,
       JCImport importTree,
       String simpleName) {
-    if (unit.getPackageName() != null) {
-      String qualifier =
-          importTree.getQualifiedIdentifier() instanceof JCFieldAccess
-              ? ((JCFieldAccess) importTree.getQualifiedIdentifier()).getExpression().toString()
-              : null;
-      if (unit.getPackageName().toString().equals(qualifier)) {
-        return true;
-      }
+    String qualifier =
+        ((JCFieldAccess) importTree.getQualifiedIdentifier()).getExpression().toString();
+    if (qualifier.equals("java.lang")) {
+      return true;
+    }
+    if (unit.getPackageName() != null && unit.getPackageName().toString().equals(qualifier)) {
+      return true;
     }
     if (importTree.getQualifiedIdentifier() instanceof JCFieldAccess
         && ((JCFieldAccess) importTree.getQualifiedIdentifier())
@@ -312,7 +288,7 @@ public class RemoveUnusedImports {
     if (usedNames.contains(simpleName)) {
       return false;
     }
-    if (usedInJavadoc.containsKey(simpleName) && javadocOnlyImports == JavadocOnlyImports.KEEP) {
+    if (usedInJavadoc.containsKey(simpleName)) {
       return false;
     }
     return true;
@@ -340,18 +316,6 @@ public class RemoveUnusedImports {
       }
       offset += replaceWith.length() - (range.upperEndpoint() - range.lowerEndpoint());
     }
-    String result = sb.toString();
-
-    // If there were any non-empty replaced ranges (e.g. javadoc), reformat the fixed regions.
-    // We could avoid formatting twice in --fix-imports=also mode, but that is not the default
-    // and removing imports won't usually affect javadoc.
-    if (!fixedRanges.isEmpty()) {
-      try {
-        result = new Formatter().formatSource(result, fixedRanges.asRanges());
-      } catch (FormatterException e) {
-        // javadoc reformatting is best-effort
-      }
-    }
-    return result;
+    return sb.toString();
   }
 }

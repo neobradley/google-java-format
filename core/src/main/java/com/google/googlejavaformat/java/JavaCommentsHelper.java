@@ -23,12 +23,14 @@ import com.google.googlejavaformat.java.javadoc.JavadocFormatter;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** {@code JavaCommentsHelper} extends {@link CommentsHelper} to rewrite Java comments. */
 public final class JavaCommentsHelper implements CommentsHelper {
 
-  private final JavaFormatterOptions options;
   private final String lineSeparator;
+  private final JavaFormatterOptions options;
 
   public JavaCommentsHelper(String lineSeparator, JavaFormatterOptions options) {
     this.lineSeparator = lineSeparator;
@@ -41,8 +43,8 @@ public final class JavaCommentsHelper implements CommentsHelper {
       return tok.getOriginalText();
     }
     String text = tok.getOriginalText();
-    if (tok.isJavadocComment()) {
-      text = JavadocFormatter.formatJavadoc(text, column0, options);
+    if (tok.isJavadocComment() && options.formatJavadoc()) {
+      text = JavadocFormatter.formatJavadoc(text, column0);
     }
     List<String> lines = new ArrayList<>();
     Iterator<String> it = Newlines.lineIterator(text);
@@ -88,8 +90,9 @@ public final class JavaCommentsHelper implements CommentsHelper {
     return builder.toString();
   }
 
-  // Remove leading and trailing whitespace, and re-indent each line.
+  // Wraps and re-indents line comments.
   private String indentLineComments(List<String> lines, int column0) {
+    lines = wrapLineComments(lines, column0);
     StringBuilder builder = new StringBuilder();
     builder.append(lines.get(0).trim());
     String indentString = Strings.repeat(" ", column0);
@@ -99,7 +102,43 @@ public final class JavaCommentsHelper implements CommentsHelper {
     return builder.toString();
   }
 
-  // Remove leading and trailing whitespace, and re-indent each line.
+  // Preserve special `//noinspection` and `//$NON-NLS-x$` comments used by IDEs, which cannot
+  // contain leading spaces.
+  private static final Pattern LINE_COMMENT_MISSING_SPACE_PREFIX =
+      Pattern.compile("^(//+)(?!noinspection|\\$NON-NLS-\\d+\\$)[^\\s/]");
+
+  private List<String> wrapLineComments(List<String> lines, int column0) {
+    List<String> result = new ArrayList<>();
+    for (String line : lines) {
+      // Add missing leading spaces to line comments: `//foo` -> `// foo`.
+      Matcher matcher = LINE_COMMENT_MISSING_SPACE_PREFIX.matcher(line);
+      if (matcher.find()) {
+        int length = matcher.group(1).length();
+        line = Strings.repeat("/", length) + " " + line.substring(length);
+      }
+      if (line.startsWith("// MOE:")) {
+        // don't wrap comments for https://github.com/google/MOE
+        result.add(line);
+        continue;
+      }
+      while (line.length() + column0 > Formatter.MAX_LINE_LENGTH) {
+        int idx = Formatter.MAX_LINE_LENGTH - column0;
+        // only break on whitespace characters, and ignore the leading `// `
+        while (idx >= 2 && !CharMatcher.whitespace().matches(line.charAt(idx))) {
+          idx--;
+        }
+        if (idx <= 2) {
+          break;
+        }
+        result.add(line.substring(0, idx));
+        line = "//" + line.substring(idx);
+      }
+      result.add(line);
+    }
+    return result;
+  }
+
+  // Remove leading whitespace (trailing was already removed), and re-indent.
   // Add a +1 indent before '*', and add the '*' if necessary.
   private String indentJavadoc(List<String> lines, int column0) {
     StringBuilder builder = new StringBuilder();
@@ -140,3 +179,4 @@ public final class JavaCommentsHelper implements CommentsHelper {
     return true;
   }
 }
+

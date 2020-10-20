@@ -17,14 +17,13 @@ package com.google.googlejavaformat.java;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
-import com.google.googlejavaformat.java.RemoveUnusedImports.JavadocOnlyImports;
 import java.util.concurrent.Callable;
 
 /**
  * Encapsulates information about a file to be formatted, including which parts of the file to
  * format.
  */
-public class FormatFileCallable implements Callable<String> {
+class FormatFileCallable implements Callable<String> {
   private final String input;
   private final CommandLineOptions parameters;
   private final JavaFormatterOptions options;
@@ -42,23 +41,21 @@ public class FormatFileCallable implements Callable<String> {
       return fixImports(input);
     }
 
-    String formatted =
-        new Formatter(options).formatSource(input, characterRanges(input).asRanges());
+    Formatter formatter = new Formatter(options);
+    String formatted = formatter.formatSource(input, characterRanges(input).asRanges());
     formatted = fixImports(formatted);
+    if (parameters.reflowLongStrings()) {
+      formatted = StringWrapper.wrap(Formatter.MAX_LINE_LENGTH, formatted, formatter);
+    }
     return formatted;
   }
 
   private String fixImports(String input) throws FormatterException {
     if (parameters.removeUnusedImports()) {
-      input =
-          RemoveUnusedImports.removeUnusedImports(
-              input,
-              parameters.removeJavadocOnlyImports()
-                  ? JavadocOnlyImports.REMOVE
-                  : JavadocOnlyImports.KEEP);
+      input = RemoveUnusedImports.removeUnusedImports(input);
     }
     if (parameters.sortImports()) {
-      input = ImportOrderer.reorderImports(input);
+      input = ImportOrderer.reorderImports(input, options.style());
     }
     return input;
   }

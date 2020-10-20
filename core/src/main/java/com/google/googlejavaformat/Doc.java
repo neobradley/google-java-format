@@ -17,13 +17,13 @@ package com.google.googlejavaformat;
 import static com.google.common.collect.Iterables.getLast;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Optional;
 import com.google.common.collect.DiscreteDomain;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Range;
 import com.google.googlejavaformat.Output.BreakTag;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * {@link com.google.googlejavaformat.java.JavaInputAstVisitor JavaInputAstVisitor} outputs a
@@ -271,11 +271,11 @@ public abstract class Doc {
     private static void splitByBreaks(List<Doc> docs, List<List<Doc>> splits, List<Break> breaks) {
       splits.clear();
       breaks.clear();
-      splits.add(new ArrayList<Doc>());
+      splits.add(new ArrayList<>());
       for (Doc doc : docs) {
         if (doc instanceof Break) {
           breaks.add((Break) doc);
-          splits.add(new ArrayList<Doc>());
+          splits.add(new ArrayList<>());
         } else {
           getLast(splits).add(doc);
         }
@@ -288,7 +288,7 @@ public abstract class Doc {
 
       state =
           computeBreakAndSplit(
-              commentsHelper, maxWidth, state, Optional.<Break>absent(), splits.get(0));
+              commentsHelper, maxWidth, state, /* optBreakDoc= */ Optional.empty(), splits.get(0));
 
       // Handle following breaks and split.
       for (int i = 0; i < breaks.size(); i++) {
@@ -571,19 +571,19 @@ public abstract class Doc {
      * Make a {@code Break}.
      *
      * @param fillMode the {@link FillMode}
-     * @param flat the the text when not broken
+     * @param flat the text when not broken
      * @param plusIndent extra indent if taken
      * @return the new {@code Break}
      */
     public static Break make(FillMode fillMode, String flat, Indent plusIndent) {
-      return new Break(fillMode, flat, plusIndent, Optional.<BreakTag>absent());
+      return new Break(fillMode, flat, plusIndent, /* optTag= */ Optional.empty());
     }
 
     /**
      * Make a {@code Break}.
      *
      * @param fillMode the {@link FillMode}
-     * @param flat the the text when not broken
+     * @param flat the text when not broken
      * @param plusIndent extra indent if taken
      * @param optTag an optional tag for remembering whether the break was taken
      * @return the new {@code Break}
@@ -722,6 +722,9 @@ public abstract class Doc {
       if (tok.isComment()) {
         if (idx > 0) {
           return idx;
+        } else if (tok.isSlashSlashComment() && !tok.getOriginalText().startsWith("// ")) {
+          // Account for line comments with missing spaces, see computeFlat.
+          return tok.length() + 1;
         } else {
           return tok.length();
         }
@@ -731,6 +734,12 @@ public abstract class Doc {
 
     @Override
     String computeFlat() {
+      // TODO(cushon): commentsHelper.rewrite doesn't get called for spans that fit in a single
+      // line. That's fine for multi-line comment reflowing, but problematic for adding missing
+      // spaces in line comments.
+      if (tok.isSlashSlashComment() && !tok.getOriginalText().startsWith("// ")) {
+        return "// " + tok.getOriginalText().substring("//".length());
+      }
       return tok.getOriginalText();
     }
 

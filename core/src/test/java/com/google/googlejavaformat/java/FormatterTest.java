@@ -16,9 +16,11 @@ package com.google.googlejavaformat.java;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
+import static org.junit.Assert.fail;
 
 import com.google.common.base.Joiner;
 import com.google.common.io.CharStreams;
+import com.google.googlejavaformat.java.JavaFormatterOptions.Style;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -82,8 +84,8 @@ public final class FormatterTest {
     assertThat(main.format("foo.go")).isEqualTo(0);
     assertThat(err.toString()).contains("Skipping non-Java file: " + "foo.go");
 
-    // should fail because the file does not exist
-    assertThat(main.format("Foo.java")).isNotEqualTo(0);
+    // format still fails on missing files
+    assertThat(main.format("Foo.java")).isEqualTo(1);
     assertThat(err.toString()).contains("Foo.java: could not read file: ");
   }
 
@@ -249,6 +251,25 @@ public final class FormatterTest {
   }
 
   @Test
+  public void importsFixedIfRequested() throws FormatterException {
+    String input =
+        "package com.google.example;\n"
+            + UNORDERED_IMPORTS
+            + "\npublic class ExampleTest {\n"
+            + "  @Nullable List<?> xs;\n"
+            + "}\n";
+    String output = new Formatter().formatSourceAndFixImports(input);
+    String expect =
+        "package com.google.example;\n\n"
+            + "import java.util.List;\n"
+            + "import javax.annotations.Nullable;\n\n"
+            + "public class ExampleTest {\n"
+            + "  @Nullable List<?> xs;\n"
+            + "}\n";
+    assertThat(output).isEqualTo(expect);
+  }
+
+  @Test
   public void importOrderingWithoutFormatting() throws IOException, UsageException {
     importOrdering(
         "--fix-imports-only", "com/google/googlejavaformat/java/testimports/A.imports-only");
@@ -322,5 +343,153 @@ public final class FormatterTest {
   public void stringEscapeLength() throws Exception {
     assertThat(new Formatter().formatSource("class T {{ f(\"\\\"\"); }}"))
         .isEqualTo("class T {\n  {\n    f(\"\\\"\");\n  }\n}\n");
+  }
+
+  @Test
+  public void wrapLineComment() throws Exception {
+    assertThat(
+            new Formatter()
+                .formatSource(
+                    "class T {\n"
+                        + "  public static void main(String[] args) { // one long incredibly"
+                        + " unbroken sentence moving from topic to topic so that no-one had a"
+                        + " chance to interrupt;\n"
+                        + "  }\n"
+                        + "}\n"))
+        .isEqualTo(
+            "class T {\n"
+                + "  public static void main(\n"
+                + "      String[]\n"
+                + "          args) { // one long incredibly unbroken sentence moving"
+                + " from topic to topic so that no-one\n"
+                + "                  // had a chance to interrupt;\n"
+                + "  }\n"
+                + "}\n");
+  }
+
+  @Test
+  public void onlyWrapLineCommentOnWhitespace() throws Exception {
+    assertThat(
+            new Formatter()
+                .formatSource(
+                    "class T {\n"
+                        + "  public static void main(String[] args) { // one_long_incredibly"
+                        + "_unbroken_sentence_moving_from_topic_to_topic_so_that_no-one_had_a"
+                        + "_chance_to_interrupt;\n"
+                        + "  }\n"
+                        + "}\n"))
+        .isEqualTo(
+            "class T {\n"
+                + "  public static void main(\n"
+                + "      String[]\n"
+                + "          args) { // one_long_incredibly"
+                + "_unbroken_sentence_moving_from_topic_to_topic_so_that_no-one_had_a"
+                + "_chance_to_interrupt;\n"
+                + "  }\n"
+                + "}\n");
+  }
+
+  @Test
+  public void onlyWrapLineCommentOnWhitespace_noLeadingWhitespace() throws Exception {
+    assertThat(
+            new Formatter()
+                .formatSource(
+                    "class T {\n"
+                        + "  public static void main(String[] args) { //one_long_incredibly"
+                        + "_unbroken_sentence_moving_from_topic_to_topic_so_that_no-one_had_a"
+                        + "_chance_to_interrupt;\n"
+                        + "  }\n"
+                        + "}\n"))
+        .isEqualTo(
+            "class T {\n"
+                + "  public static void main(\n"
+                + "      String[]\n"
+                + "          args) { // one_long_incredibly"
+                + "_unbroken_sentence_moving_from_topic_to_topic_so_that_no-one_had_a"
+                + "_chance_to_interrupt;\n"
+                + "  }\n"
+                + "}\n");
+  }
+
+  @Test
+  public void throwsFormatterException() throws Exception {
+    try {
+      new Formatter().formatSourceAndFixImports("package foo; public class {");
+      fail();
+    } catch (FormatterException expected) {
+    }
+  }
+
+  @Test
+  public void blankLinesImportComment() throws FormatterException {
+    String withBlank =
+        "package p;\n"
+            + "\n"
+            + "/** test */\n"
+            + "\n"
+            + "import a.A;\n"
+            + "\n"
+            + "class T {\n"
+            + "  A a;\n"
+            + "}\n";
+    String withoutBlank =
+        "package p;\n"
+            + "\n"
+            + "/** test */\n"
+            + "import a.A;\n"
+            + "\n"
+            + "class T {\n"
+            + "  A a;\n"
+            + "}\n";
+
+    // Formatting deletes the blank line between the "javadoc" and the first import.
+    assertThat(new Formatter().formatSource(withBlank)).isEqualTo(withoutBlank);
+    assertThat(new Formatter().formatSourceAndFixImports(withBlank)).isEqualTo(withoutBlank);
+    assertThat(new Formatter().formatSource(withoutBlank)).isEqualTo(withoutBlank);
+    assertThat(new Formatter().formatSourceAndFixImports(withoutBlank)).isEqualTo(withoutBlank);
+
+    // Just fixing imports preserves whitespace around imports.
+    assertThat(RemoveUnusedImports.removeUnusedImports(withBlank)).isEqualTo(withBlank);
+    assertThat(ImportOrderer.reorderImports(withBlank, Style.GOOGLE)).isEqualTo(withBlank);
+    assertThat(RemoveUnusedImports.removeUnusedImports(withoutBlank)).isEqualTo(withoutBlank);
+    assertThat(ImportOrderer.reorderImports(withoutBlank, Style.GOOGLE)).isEqualTo(withoutBlank);
+  }
+
+  @Test
+  public void dontWrapMoeLineComments() throws Exception {
+    assertThat(
+            new Formatter()
+                .formatSource(
+                    "class T {\n"
+                        + "  // MOE: one long incredibly"
+                        + " unbroken sentence moving from topic to topic so that no-one had a"
+                        + " chance to interrupt;\n"
+                        + "}\n"))
+        .isEqualTo(
+            "class T {\n"
+                + "  // MOE: one long incredibly"
+                + " unbroken sentence moving from topic to topic so that no-one had a"
+                + " chance to interrupt;\n"
+                + "}\n");
+  }
+
+  @Test
+  public void removeTrailingTabsInComments() throws Exception {
+    assertThat(
+            new Formatter()
+                .formatSource(
+                    "class Foo {\n"
+                        + "  void f() {\n"
+                        + "    int x = 0; // comment\t\t\t\n"
+                        + "    return;\n"
+                        + "  }\n"
+                        + "}\n"))
+        .isEqualTo(
+            "class Foo {\n"
+                + "  void f() {\n"
+                + "    int x = 0; // comment\n"
+                + "    return;\n"
+                + "  }\n"
+                + "}\n");
   }
 }

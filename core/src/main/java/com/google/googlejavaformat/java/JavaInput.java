@@ -33,6 +33,13 @@ import com.google.common.collect.TreeRangeSet;
 import com.google.googlejavaformat.Input;
 import com.google.googlejavaformat.Newlines;
 import com.google.googlejavaformat.java.JavacTokens.RawTok;
+import com.sun.tools.javac.file.JavacFileManager;
+import com.sun.tools.javac.parser.Tokens.TokenKind;
+import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
+import com.sun.tools.javac.util.Context;
+import com.sun.tools.javac.util.Log;
+import com.sun.tools.javac.util.Log.DeferredDiagnosticHandler;
+import com.sun.tools.javac.util.Options;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
@@ -45,12 +52,6 @@ import javax.tools.DiagnosticListener;
 import javax.tools.JavaFileObject;
 import javax.tools.JavaFileObject.Kind;
 import javax.tools.SimpleJavaFileObject;
-import org.openjdk.tools.javac.file.JavacFileManager;
-import org.openjdk.tools.javac.parser.Tokens.TokenKind;
-import org.openjdk.tools.javac.tree.JCTree.JCCompilationUnit;
-import org.openjdk.tools.javac.util.Context;
-import org.openjdk.tools.javac.util.Log;
-import org.openjdk.tools.javac.util.Log.DeferredDiagnosticHandler;
 
 /** {@code JavaInput} extends {@link Input} to represent a Java input document. */
 public final class JavaInput extends Input {
@@ -59,10 +60,9 @@ public final class JavaInput extends Input {
    * either a token (if {@code isToken()}), or a non-token, which is a comment (if {@code
    * isComment()}) or a newline (if {@code isNewline()}) or a maximal sequence of other whitespace
    * characters (if {@code isSpaces()}). Each {@link Tok} contains a sequence of characters, an
-   * index (sequential starting at {@code 0} for tokens and comments, else {@code -1}), and an
-   * Eclipse-compatible ({@code 0}-origin) position in the input. The concatenation of the texts of
-   * all the {@link Tok}s equals the input. Each Input ends with a token EOF {@link Tok}, with empty
-   * text.
+   * index (sequential starting at {@code 0} for tokens and comments, else {@code -1}), and a
+   * ({@code 0}-origin) position in the input. The concatenation of the texts of all the {@link
+   * Tok}s equals the input. Each Input ends with a token EOF {@link Tok}, with empty text.
    *
    * <p>A {@code /*} comment possibly contains newlines; a {@code //} comment does not contain the
    * terminating newline character, but is followed by a newline {@link Tok}.
@@ -155,7 +155,9 @@ public final class JavaInput extends Input {
 
     @Override
     public boolean isJavadocComment() {
-      return text.startsWith("/**") && text.length() > 4;
+      // comments like `/***` are also javadoc, but their formatting probably won't be improved
+      // by the javadoc formatter
+      return text.startsWith("/**") && text.charAt("/**".length()) != '*' && text.length() > 4;
     }
 
     @Override
@@ -329,7 +331,7 @@ public final class JavaInput extends Input {
 
   /** Lex the input and build the list of toks. */
   private ImmutableList<Tok> buildToks(String text) throws FormatterException {
-    ImmutableList<Tok> toks = buildToks(text, ImmutableSet.<TokenKind>of());
+    ImmutableList<Tok> toks = buildToks(text, ImmutableSet.of());
     kN = getLast(toks).getIndex();
     computeRanges(toks);
     return toks;
@@ -346,6 +348,7 @@ public final class JavaInput extends Input {
       throws FormatterException {
     stopTokens = ImmutableSet.<TokenKind>builder().addAll(stopTokens).add(TokenKind.EOF).build();
     Context context = new Context();
+    Options.instance(context).put("--enable-preview", "true");
     new JavacFileManager(context, true, UTF_8);
     DiagnosticCollector<JavaFileObject> diagnosticCollector = new DiagnosticCollector<>();
     context.put(DiagnosticListener.class, diagnosticCollector);
@@ -481,12 +484,20 @@ public final class JavaInput extends Input {
     int k = 0;
     int kN = toks.size();
 
-    while (k < kN) {
-      // Remaining non-tokens before the token go here.
-      ImmutableList.Builder<Tok> toksBefore = ImmutableList.builder();
+    // Remaining non-tokens before the token go here.
+    ImmutableList.Builder<Tok> toksBefore = ImmutableList.builder();
 
+    OUTERMOST:
+    while (k < kN) {
       while (!toks.get(k).isToken()) {
-        toksBefore.add(toks.get(k++));
+        Tok tok = toks.get(k++);
+        toksBefore.add(tok);
+        if (isParamComment(tok)) {
+          while (toks.get(k).isNewline()) {
+            // drop newlines after parameter comments
+            k++;
+          }
+        }
       }
       Tok tok = toks.get(k++);
 
@@ -519,6 +530,15 @@ public final class JavaInput extends Input {
               break;
           }
         }
+        if (isParamComment(toks.get(k))) {
+          tokens.add(new Token(toksBefore.build(), tok, toksAfter.build()));
+          toksBefore = ImmutableList.<Tok>builder().add(toks.get(k++));
+          // drop newlines after parameter comments
+          while (toks.get(k).isNewline()) {
+            k++;
+          }
+          continue OUTERMOST;
+        }
         Tok nonTokenAfter = toks.get(k++);
         toksAfter.add(nonTokenAfter);
         if (Newlines.containsBreaks(nonTokenAfter.getText())) {
@@ -526,8 +546,14 @@ public final class JavaInput extends Input {
         }
       }
       tokens.add(new Token(toksBefore.build(), tok, toksAfter.build()));
+      toksBefore = ImmutableList.builder();
     }
     return tokens.build();
+  }
+
+  private static boolean isParamComment(Tok tok) {
+    return tok.isSlashStarComment()
+        && tok.getText().matches("\\/\\*[A-Za-z0-9\\s_\\-]+=\\s*\\*\\/");
   }
 
   /**
@@ -536,7 +562,7 @@ public final class JavaInput extends Input {
    * @param offset the {@code 0}-based offset in characters
    * @param length the length in characters
    * @return the {@code 0}-based {@link Range} of tokens
-   * @throws FormatterException
+   * @throws FormatterException if offset + length is outside the file
    */
   Range<Integer> characterRangeToTokenRange(int offset, int length) throws FormatterException {
     int requiredLength = offset + length;
@@ -570,7 +596,8 @@ public final class JavaInput extends Input {
    *
    * @return the number of toks, including the EOF tok
    */
-  int getkN() {
+  @Override
+  public int getkN() {
     return kN;
   }
 
@@ -579,7 +606,8 @@ public final class JavaInput extends Input {
    *
    * @param k the token index
    */
-  Token getToken(int k) {
+  @Override
+  public Token getToken(int k) {
     return kToToken[k];
   }
 

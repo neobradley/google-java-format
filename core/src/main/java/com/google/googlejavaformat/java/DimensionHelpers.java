@@ -15,16 +15,16 @@
 package com.google.googlejavaformat.java;
 
 import com.google.common.collect.ImmutableList;
+import com.sun.source.tree.AnnotatedTypeTree;
+import com.sun.source.tree.AnnotationTree;
+import com.sun.source.tree.ArrayTypeTree;
+import com.sun.source.tree.Tree;
+import com.sun.tools.javac.tree.JCTree;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
-import org.openjdk.source.tree.AnnotatedTypeTree;
-import org.openjdk.source.tree.AnnotationTree;
-import org.openjdk.source.tree.ArrayTypeTree;
-import org.openjdk.source.tree.Tree;
-import org.openjdk.tools.javac.tree.JCTree;
 
 /**
  * Utilities for working with array dimensions.
@@ -34,7 +34,7 @@ import org.openjdk.tools.javac.tree.JCTree;
  *
  * <p>For example, {@code int [] a;} cannot be distinguished from {@code int [] a [];} in the AST.
  */
-public class DimensionHelpers {
+class DimensionHelpers {
 
   /** The array dimension specifiers (including any type annotations) associated with a type. */
   static class TypeWithDims {
@@ -115,7 +115,7 @@ public class DimensionHelpers {
           return node;
         }
         node = extractDims(dims, annotatedTypeTree.getUnderlyingType());
-        dims.addFirst(ImmutableList.<AnnotationTree>copyOf(annotatedTypeTree.getAnnotations()));
+        dims.addFirst(ImmutableList.copyOf(annotatedTypeTree.getAnnotations()));
         return node;
       default:
         return node;
